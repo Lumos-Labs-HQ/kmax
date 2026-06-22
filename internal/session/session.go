@@ -72,7 +72,22 @@ func List(kiroDataDir, dataDB string) ([]Session, error) {
 		s.Active = !s.Ended && activeUUID != "" && s.UUID == activeUUID
 		sessions = append(sessions, s)
 	}
-	sort.Slice(sessions, func(i, j int) bool {
+	// statusRank: ended (0) → active (1) → idle (2)
+	statusRank := func(s Session) int {
+		if s.Ended {
+			return 0
+		}
+		if s.Active {
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(sessions, func(i, j int) bool {
+		ri, rj := statusRank(sessions[i]), statusRank(sessions[j])
+		if ri != rj {
+			return ri < rj
+		}
+		// Within same group, sort numerically then alphabetically.
 		a, aerr := strconv.Atoi(sessions[i].FileName)
 		b, berr := strconv.Atoi(sessions[j].FileName)
 		if aerr == nil && berr == nil {
@@ -156,6 +171,12 @@ func mergeConversations(srcPath, dstPath string) error {
 		return nil
 	}
 
+	var rowCount int
+	src.QueryRow(`SELECT count(*) FROM conversations_v2`).Scan(&rowCount)
+	if rowCount == 0 {
+		return nil
+	}
+
 	var tblExists int
 	dst.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='conversations_v2'`).Scan(&tblExists)
 	if tblExists == 0 {
@@ -173,6 +194,15 @@ func mergeConversations(srcPath, dstPath string) error {
 		if src.QueryRow(`SELECT id, version FROM migrations WHERE version=7`).Scan(&migID, &migVersion) == nil {
 			now := time.Now().UnixMilli()
 			dst.Exec(`INSERT OR IGNORE INTO migrations(id, version, migration_time) VALUES(?,?,?)`, migID, migVersion, now)
+		}
+	} else {
+		// Skip if src has no rows newer than dst's max updated_at.
+		var dstLatest int64
+		dst.QueryRow(`SELECT COALESCE(max(updated_at),0) FROM conversations_v2`).Scan(&dstLatest)
+		var srcNewer int
+		src.QueryRow(`SELECT count(*) FROM conversations_v2 WHERE updated_at > ?`, dstLatest).Scan(&srcNewer)
+		if srcNewer == 0 {
+			return nil
 		}
 	}
 
@@ -198,6 +228,38 @@ func mergeConversations(srcPath, dstPath string) error {
 			key, convID, value, createdAt, updatedAt)
 	}
 	return tx.Commit()
+}
+
+// readTokenFromDB reads the OAuth token and its expiry from data.sqlite3.
+func readTokenFromDB(dataDB string) (token string, expiresAt time.Time) {
+	d, err := db.Open(dataDB)
+	if err != nil {
+		return
+	}
+	defer d.Close()
+	return db.ReadToken(d)
+}
+
+// readAuthKV returns the raw auth_kv value for the social token key from data.sqlite3.
+func readAuthKV(dataDB string) string {
+	d, err := db.Open(dataDB)
+	if err != nil {
+		return ""
+	}
+	defer d.Close()
+	var raw string
+	d.QueryRow(`SELECT value FROM auth_kv WHERE key='kirocli:social:token'`).Scan(&raw)
+	return raw
+}
+
+// writeAuthKV writes the raw auth_kv value for the social token key into data.sqlite3.
+func writeAuthKV(dataDB, raw string) {
+	d, err := db.Open(dataDB)
+	if err != nil {
+		return
+	}
+	defer d.Close()
+	d.Exec(`INSERT OR REPLACE INTO auth_kv(key,value) VALUES('kirocli:social:token',?)`, raw)
 }
 
 // repairStateTable ensures state uses value BLOB (required by kiro-cli 1.29.7+) and
@@ -304,6 +366,10 @@ func SwapTo(s Session, dataDB, kiroDataDir string) error {
 		return fmt.Errorf("failed to sync active session back: %w", err)
 	}
 
+	// Save the current token and raw auth_kv before overwriting data.sqlite3.
+	oldToken, oldExpiry := readTokenFromDB(dataDB)
+	oldRaw := readAuthKV(dataDB)
+
 	entries, _ := os.ReadDir(kiroDataDir)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sqlite3") {
@@ -332,6 +398,14 @@ func SwapTo(s Session, dataDB, kiroDataDir string) error {
 	repairConversationsTable(s.File)
 	ensureConversationsTable(dataDB)
 	ensureConversationsTable(s.File)
+
+	// If the new token is empty or expired but the old one was valid, restore it.
+	if oldToken != "" && !time.Now().After(oldExpiry) {
+		newToken, newExpiry := readTokenFromDB(dataDB)
+		if newToken == "" || (!newExpiry.IsZero() && time.Now().After(newExpiry)) {
+			writeAuthKV(dataDB, oldRaw)
+		}
+	}
 
 	now := time.Now().Format(time.RFC3339)
 	for _, path := range []string{s.File, dataDB} {
