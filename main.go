@@ -31,9 +31,18 @@ func printHelp() {
 	fmt.Println()
 }
 
+func launchKiro(args ...string) {
+	bin, err := exec.LookPath("kiro-cli")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "kiro-cli not found on PATH")
+		os.Exit(1)
+	}
+	syscall.Exec(bin, append([]string{"kiro-cli"}, args...), os.Environ())
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		printHelp()
+		launchKiro()
 		return
 	}
 
@@ -79,9 +88,10 @@ func main() {
 		cmd.Login()
 		fmt.Println()
 	case "continue", "c":
-		bin, _ := exec.LookPath("kiro-cli-chat")
-		syscall.Exec(bin, []string{"kiro-cli-chat", "chat", "--resume-picker"}, os.Environ())
-	default:
+		launchKiro("chat", "--resume-picker")
+	case "help", "-h", "--help":
 		printHelp()
+	default:
+		launchKiro(os.Args[1:]...)
 	}
 }

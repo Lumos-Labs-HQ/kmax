@@ -78,12 +78,24 @@ func End(arg string) {
 	if err != nil {
 		config.Die(err)
 	}
+	// Write ended flag to the session file.
 	d, err := db.Open(s.File)
 	if err != nil {
 		config.Die("error:", err)
 	}
 	db.SetMeta(d, "ended", "true")
 	d.Close()
+
+	// If this session is currently active, also mark ended in data.sqlite3
+	// so that SyncActiveBack (which copies data.sqlite3 → session file) won't
+	// erase the ended flag.
+	if s.Active {
+		ld, err := db.Open(config.DataDB)
+		if err == nil {
+			db.SetMeta(ld, "ended", "true")
+			ld.Close()
+		}
+	}
 	ui.Success(fmt.Sprintf("Session %s marked as ended", ui.Bold(s.FileName)))
 }
 
