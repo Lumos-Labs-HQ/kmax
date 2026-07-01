@@ -7,6 +7,10 @@ import (
 )
 
 func KiroBase() string {
+	// Respect XDG_DATA_HOME if set (e.g. when using isolated account via kiro-ubuntu wrapper)
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "kiro-cli")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		panic("cannot determine home directory: " + err.Error())

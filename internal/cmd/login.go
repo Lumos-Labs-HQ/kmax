@@ -39,7 +39,11 @@ func Login() {
 	ui.Info("Starting kiro-cli login (Builder ID)...")
 	fmt.Println()
 
-	cmd := exec.Command("kiro-cli", "login", "--license", "free")
+	// Always use device flow — kmax is a CLI tool and browser-based auth is unreliable
+	// inside containers or headless environments.
+	loginArgs := []string{"login", "--license", "free", "--use-device-flow"}
+
+	cmd := exec.Command("kiro-cli", loginArgs...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
