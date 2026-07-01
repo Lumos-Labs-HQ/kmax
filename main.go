@@ -23,6 +23,8 @@ func printHelp() {
 		{"  reset [<id>]  ", "Unend all sessions (or one), clearing used_at"},
 		{"  credits [<id>]", "Show live credit usage (defaults to active)"},
 		{"  login         ", "Log in to a new account and save it as a session"},
+		{"  sync -f cac   ", "Sync conversations from CachyOS → Ubuntu"},
+		{"  sync -f ubu   ", "Sync conversations from Ubuntu → CachyOS"},
 		{"  continue, c   ", "Pick & resume a previous conversation"},
 	}
 	for _, r := range rows {
@@ -83,6 +85,19 @@ func main() {
 			arg = os.Args[2]
 		}
 		cmd.Credits(arg)
+	case "sync":
+		from := ""
+		for i, a := range os.Args[2:] {
+			if a == "-f" && i+1 < len(os.Args[2:]) {
+				from = os.Args[i+3]
+			}
+		}
+		if from == "" {
+			fmt.Fprintln(os.Stderr, "usage: kmax sync -f cac|ubu")
+			os.Exit(1)
+		}
+		fmt.Println()
+		cmd.Sync(from)
 	case "login":
 		fmt.Println()
 		cmd.Login()
