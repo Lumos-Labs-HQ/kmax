@@ -22,9 +22,11 @@ func printHelp() {
 		{"  end <id>      ", "Mark a session as ended"},
 		{"  reset [<id>]  ", "Unend all sessions (or one), clearing used_at"},
 		{"  credits [<id>]", "Show live credit usage (defaults to active)"},
-		{"  login         ", "Log in to a new account and save it as a session"},
+		{"  login [-a]    ", "Log in to a new account and save it as a session (-a for device flow)"},
 		{"  sync -f cac   ", "Sync conversations from CachyOS → Ubuntu"},
 		{"  sync -f ubu   ", "Sync conversations from Ubuntu → CachyOS"},
+		{"  clean         ", "Clear history of all sessions except the active one"},
+		{"  clean -f      ", "Clear history of the current active session only"},
 		{"  continue, c   ", "Pick & resume a previous conversation"},
 	}
 	for _, r := range rows {
@@ -99,9 +101,24 @@ func main() {
 		fmt.Println()
 		cmd.Sync(from)
 	case "login":
+		deviceFlow := false
+		for _, a := range os.Args[2:] {
+			if a == "-a" {
+				deviceFlow = true
+			}
+		}
 		fmt.Println()
-		cmd.Login()
+		cmd.Login(deviceFlow)
 		fmt.Println()
+	case "clean":
+		force := false
+		for _, a := range os.Args[2:] {
+			if a == "-f" {
+				force = true
+			}
+		}
+		fmt.Println()
+		cmd.Clean(force)
 	case "continue", "c":
 		launchKiro("chat", "--resume-picker")
 	case "help", "-h", "--help":

@@ -10,7 +10,10 @@ import (
 	"github.com/Lumos-Labs-HQ/kmax/internal/ui"
 )
 
-func Login() {
+// Login logs in to a new account and saves it as a session.
+// Pass deviceFlow=true to use the OAuth device flow (--use-device-flow) instead of
+// opening a browser, which is required in headless/container environments.
+func Login(deviceFlow bool) {
 	fmt.Print("Session name (e.g. company-1, work): ")
 	var name string
 	fmt.Scanln(&name)
@@ -36,12 +39,14 @@ func Login() {
 	}
 
 	fmt.Println()
-	ui.Info("Starting kiro-cli login (Builder ID)...")
+	loginArgs := []string{"login", "--license", "free"}
+	if deviceFlow {
+		ui.Info("Starting kiro-cli login (device flow)...")
+		loginArgs = append(loginArgs, "--use-device-flow")
+	} else {
+		ui.Info("Starting kiro-cli login (Google)...")
+	}
 	fmt.Println()
-
-	// Always use device flow — kmax is a CLI tool and browser-based auth is unreliable
-	// inside containers or headless environments.
-	loginArgs := []string{"login", "--license", "free", "--use-device-flow"}
 
 	cmd := exec.Command("kiro-cli", loginArgs...)
 	cmd.Stdin = os.Stdin
