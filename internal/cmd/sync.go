@@ -13,18 +13,14 @@ import (
 )
 
 const (
-	flagCac = "cac" // CachyOS → Ubuntu
-	flagUbu = "ubu" // Ubuntu → CachyOS
+	flagCac = "cac"
+	flagUbu = "ubu"
 )
 
-// realHome returns the actual user home, ignoring any HOME override from wrappers.
-// It walks up XDG_DATA_HOME or falls back to /home/<user> via the OS user lookup.
 func realHome() string {
-	// Try passwd-based lookup which ignores the HOME env var
 	if u, err := user.Current(); err == nil {
 		return u.HomeDir
 	}
-	// Fallback
 	home, _ := os.UserHomeDir()
 	return home
 }
@@ -72,7 +68,6 @@ func Sync(from string) {
 	}
 	defer dst.Close()
 
-	// Sync conversations table (only if it exists in both)
 	convCount := 0
 	if tableExists(src, "conversations") && tableExists(dst, "conversations") {
 		n, err := syncConversations(src, dst)
@@ -82,7 +77,6 @@ func Sync(from string) {
 		convCount = n
 	}
 
-	// Sync conversations_v2 table (only if it exists in both)
 	conv2Count := 0
 	if tableExists(src, "conversations_v2") && tableExists(dst, "conversations_v2") {
 		n, err := syncConversationsV2(src, dst)

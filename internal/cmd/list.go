@@ -26,8 +26,7 @@ func List() {
 		wStatus = 8
 	)
 
-	// Dynamic name column width.
-	wName := 4 // min width = len("NAME")
+	wName := 4
 	for _, s := range sessions {
 		if len(s.FileName) > wName {
 			wName = len(s.FileName)

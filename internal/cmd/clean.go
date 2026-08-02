@@ -13,7 +13,6 @@ import (
 	"github.com/Lumos-Labs-HQ/kmax/internal/ui"
 )
 
-// left completely intact (auth, state, migrations, kmax_meta are untouched).
 func clearHistory(dbPath string) error {
 	d, err := db.Open(dbPath)
 	if err != nil {
@@ -21,15 +20,12 @@ func clearHistory(dbPath string) error {
 	}
 	defer d.Close()
 
-	// conversations table (always present in kiro-cli DBs)
 	if _, err := d.Exec(`DELETE FROM conversations`); err != nil {
-		// Table may not exist in very old session files — that's fine.
 		if !strings.Contains(err.Error(), "no such table") {
 			return fmt.Errorf("clear conversations in %s: %w", dbPath, err)
 		}
 	}
 
-	// conversations_v2 — only present after kiro-cli migration 7
 	var hasV2 int
 	d.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='conversations_v2'`).Scan(&hasV2)
 	if hasV2 > 0 {
@@ -38,7 +34,6 @@ func clearHistory(dbPath string) error {
 		}
 	}
 
-	// Reclaim freed pages so the file actually shrinks on disk.
 	if _, err := d.Exec(`VACUUM`); err != nil {
 		return fmt.Errorf("vacuum %s: %w", dbPath, err)
 	}
@@ -46,8 +41,6 @@ func clearHistory(dbPath string) error {
 	return nil
 }
 
-// Clean wipes conversation history from all sessions except the currently active one.
-// Pass force=true to instead wipe only the active (current) session's history.
 func Clean(force bool) {
 	config.EnsureDataDir()
 
@@ -56,7 +49,6 @@ func Clean(force bool) {
 		config.Die("error:", err)
 	}
 
-	// Identify active session.
 	var activeSess *session.Session
 	for i := range sessions {
 		if sessions[i].Active {
@@ -66,7 +58,6 @@ func Clean(force bool) {
 	}
 
 	if force {
-		// -f: clean the current (active) session only.
 		if activeSess == nil {
 			config.Die("no active session found")
 		}
@@ -74,12 +65,10 @@ func Clean(force bool) {
 			ui.Bold("Cleaning history for active session:"),
 			ui.Cyan(activeSess.FileName))
 
-		// Clear the live data.sqlite3 (what kiro-cli is reading).
 		if err := clearHistory(config.DataDB); err != nil {
 			config.Die("error:", err)
 		}
 
-		// Sync the cleared state back to the session file so it matches.
 		data, err := os.ReadFile(config.DataDB)
 		if err != nil {
 			config.Die("error reading data.sqlite3:", err)
@@ -94,8 +83,6 @@ func Clean(force bool) {
 		return
 	}
 
-	// Default: clean all sessions except the active one.
-	// Collect the file paths to clean.
 	var targets []session.Session
 	for _, s := range sessions {
 		if !s.Active {
@@ -117,8 +104,6 @@ func Clean(force bool) {
 		ui.Bold("Cleaning history for all sessions except:"),
 		ui.Cyan(activeLabel))
 
-	cleaned := 0
-	// Each target file is independent — safe to clear in parallel.
 	type result struct {
 		name string
 		err  error
@@ -135,6 +120,7 @@ func Clean(force bool) {
 	}
 	wg.Wait()
 
+	cleaned := 0
 	for _, r := range results {
 		if r.err != nil {
 			ui.Fail(fmt.Sprintf("%-20s %s", r.name, r.err.Error()))

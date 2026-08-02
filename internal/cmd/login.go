@@ -10,9 +10,6 @@ import (
 	"github.com/Lumos-Labs-HQ/kmax/internal/ui"
 )
 
-// Login logs in to a new account and saves it as a session.
-// Pass deviceFlow=true to use the OAuth device flow (--use-device-flow) instead of
-// opening a browser, which is required in headless/container environments.
 func Login(deviceFlow bool) {
 	fmt.Print("Session name (e.g. company-1, work): ")
 	var name string

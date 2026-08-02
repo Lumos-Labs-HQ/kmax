@@ -7,7 +7,6 @@ import (
 )
 
 func KiroBase() string {
-	// Respect XDG_DATA_HOME if set (e.g. when using isolated account via kiro-ubuntu wrapper)
 	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
 		return filepath.Join(xdg, "kiro-cli")
 	}
@@ -23,7 +22,6 @@ var (
 	KiroDataDir = filepath.Join(KiroBase(), "kiro_data")
 )
 
-// EnsureDataDir creates kiro_data if it doesn't exist.
 func EnsureDataDir() {
 	if err := os.MkdirAll(KiroDataDir, 0700); err != nil {
 		fmt.Fprintln(os.Stderr, "error: cannot create kiro_data dir:", err)

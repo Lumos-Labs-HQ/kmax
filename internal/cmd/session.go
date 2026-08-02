@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/Lumos-Labs-HQ/kmax/internal/config"
 	"github.com/Lumos-Labs-HQ/kmax/internal/db"
@@ -16,8 +17,6 @@ func Swap() {
 		config.Die("error:", err)
 	}
 
-	// Mark the current active session as ended in data.sqlite3 BEFORE SyncActiveBack
-	// so the ended flag is preserved when the live file is copied back to s.File.
 	for _, s := range sessions {
 		if s.Active {
 			d, err := db.Open(config.DataDB)
@@ -31,7 +30,6 @@ func Swap() {
 		}
 	}
 
-	// Re-list so ended flags are reflected.
 	sessions, err = session.List(config.KiroDataDir, config.DataDB)
 	if err != nil {
 		config.Die("error:", err)
@@ -78,7 +76,6 @@ func End(arg string) {
 	if err != nil {
 		config.Die(err)
 	}
-	// Write ended flag to the session file.
 	d, err := db.Open(s.File)
 	if err != nil {
 		config.Die("error:", err)
@@ -86,9 +83,6 @@ func End(arg string) {
 	db.SetMeta(d, "ended", "true")
 	d.Close()
 
-	// If this session is currently active, also mark ended in data.sqlite3
-	// so that SyncActiveBack (which copies data.sqlite3 → session file) won't
-	// erase the ended flag.
 	if s.Active {
 		ld, err := db.Open(config.DataDB)
 		if err == nil {
@@ -120,14 +114,22 @@ func Reset(arg string) {
 	if err != nil {
 		config.Die("error:", err)
 	}
+
+	var wg sync.WaitGroup
 	for _, s := range sessions {
-		d, err := db.Open(s.File)
-		if err != nil {
-			continue
-		}
-		db.SetMeta(d, "ended", "false")
-		db.SetMeta(d, "used_at", "")
-		d.Close()
+		wg.Add(1)
+		go func(sess session.Session) {
+			defer wg.Done()
+			d, err := db.Open(sess.File)
+			if err != nil {
+				return
+			}
+			db.SetMeta(d, "ended", "false")
+			db.SetMeta(d, "used_at", "")
+			d.Close()
+		}(s)
 	}
+	wg.Wait()
+
 	ui.Success(fmt.Sprintf("All %d sessions unended — available for swap again", len(sessions)))
 }

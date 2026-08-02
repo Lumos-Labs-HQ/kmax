@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Lumos-Labs-HQ/kmax/internal/db"
@@ -25,7 +26,6 @@ type Session struct {
 	UsedAt         time.Time
 }
 
-// Load reads session metadata from a session file in kiroDataDir.
 func Load(name, kiroDataDir string) (Session, error) {
 	path := filepath.Join(kiroDataDir, name+".sqlite3")
 	d, err := db.Open(path)
@@ -52,27 +52,48 @@ func Load(name, kiroDataDir string) (Session, error) {
 	}, nil
 }
 
-// List returns all sessions in kiroDataDir, sorted numerically then alphabetically.
 func List(kiroDataDir, dataDB string) ([]Session, error) {
 	entries, err := os.ReadDir(kiroDataDir)
 	if err != nil {
 		return nil, err
 	}
-	activeUUID := LiveActiveUUID(dataDB)
-	var sessions []Session
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sqlite3") {
-			continue
-		}
-		name := strings.TrimSuffix(e.Name(), ".sqlite3")
-		s, err := Load(name, kiroDataDir)
-		if err != nil {
-			continue
-		}
-		s.Active = !s.Ended && activeUUID != "" && s.UUID == activeUUID
-		sessions = append(sessions, s)
+
+	type indexedEntry struct {
+		idx  int
+		name string
 	}
-	// statusRank: ended (0) → active (1) → idle (2)
+	var validEntries []indexedEntry
+	for i, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sqlite3") {
+			validEntries = append(validEntries, indexedEntry{i, strings.TrimSuffix(e.Name(), ".sqlite3")})
+		}
+	}
+
+	activeUUID := LiveActiveUUID(dataDB)
+
+	sessions := make([]Session, len(validEntries))
+	var wg sync.WaitGroup
+	for i, entry := range validEntries {
+		wg.Add(1)
+		go func(slot int, name string) {
+			defer wg.Done()
+			s, err := Load(name, kiroDataDir)
+			if err != nil {
+				return
+			}
+			s.Active = !s.Ended && activeUUID != "" && s.UUID == activeUUID
+			sessions[slot] = s
+		}(i, entry.name)
+	}
+	wg.Wait()
+
+	var result []Session
+	for _, s := range sessions {
+		if s.FileName != "" {
+			result = append(result, s)
+		}
+	}
+
 	statusRank := func(s Session) int {
 		if s.Ended {
 			return 0
@@ -82,26 +103,24 @@ func List(kiroDataDir, dataDB string) ([]Session, error) {
 		}
 		return 2
 	}
-	sort.SliceStable(sessions, func(i, j int) bool {
-		ri, rj := statusRank(sessions[i]), statusRank(sessions[j])
+	sort.SliceStable(result, func(i, j int) bool {
+		ri, rj := statusRank(result[i]), statusRank(result[j])
 		if ri != rj {
 			return ri < rj
 		}
-		// Within same group, sort numerically then alphabetically.
-		a, aerr := strconv.Atoi(sessions[i].FileName)
-		b, berr := strconv.Atoi(sessions[j].FileName)
+		a, aerr := strconv.Atoi(result[i].FileName)
+		b, berr := strconv.Atoi(result[j].FileName)
 		if aerr == nil && berr == nil {
 			return a < b
 		}
-		return sessions[i].FileName < sessions[j].FileName
+		return result[i].FileName < result[j].FileName
 	})
-	for i := range sessions {
-		sessions[i].ID = i + 1
+	for i := range result {
+		result[i].ID = i + 1
 	}
-	return sessions, nil
+	return result, nil
 }
 
-// LiveActiveUUID returns the UUID of the session currently loaded in data.sqlite3.
 func LiveActiveUUID(dataDB string) string {
 	d, err := db.Open(dataDB)
 	if err != nil {
@@ -111,7 +130,6 @@ func LiveActiveUUID(dataDB string) string {
 	return db.GetMeta(d, "active_uuid")
 }
 
-// UsedThisMonth reports whether the session was swapped in during the current calendar month.
 func UsedThisMonth(s Session) bool {
 	if s.UsedAt.IsZero() {
 		return false
@@ -120,7 +138,6 @@ func UsedThisMonth(s Session) bool {
 	return s.UsedAt.Year() == now.Year() && s.UsedAt.Month() == now.Month()
 }
 
-// syncMigrations copies any missing migration rows from src into dst.
 func syncMigrations(srcPath, dstPath string) error {
 	src, err := db.Open(srcPath)
 	if err != nil {
@@ -151,7 +168,6 @@ func syncMigrations(srcPath, dstPath string) error {
 	return nil
 }
 
-// mergeConversations copies conversations_v2 rows from src into dst.
 func mergeConversations(srcPath, dstPath string) error {
 	src, err := db.Open(srcPath)
 	if err != nil {
@@ -196,7 +212,6 @@ func mergeConversations(srcPath, dstPath string) error {
 			dst.Exec(`INSERT OR IGNORE INTO migrations(id, version, migration_time) VALUES(?,?,?)`, migID, migVersion, now)
 		}
 	} else {
-		// Skip if src has no rows newer than dst's max updated_at.
 		var dstLatest int64
 		dst.QueryRow(`SELECT COALESCE(max(updated_at),0) FROM conversations_v2`).Scan(&dstLatest)
 		var srcNewer int
@@ -230,7 +245,6 @@ func mergeConversations(srcPath, dstPath string) error {
 	return tx.Commit()
 }
 
-// readTokenFromDB reads the OAuth token and its expiry from data.sqlite3.
 func readTokenFromDB(dataDB string) (token string, expiresAt time.Time) {
 	d, err := db.Open(dataDB)
 	if err != nil {
@@ -240,7 +254,6 @@ func readTokenFromDB(dataDB string) (token string, expiresAt time.Time) {
 	return db.ReadToken(d)
 }
 
-// readAuthKV returns the raw auth_kv value for the social token key from data.sqlite3.
 func readAuthKV(dataDB string) string {
 	d, err := db.Open(dataDB)
 	if err != nil {
@@ -252,7 +265,6 @@ func readAuthKV(dataDB string) string {
 	return raw
 }
 
-// writeAuthKV writes the raw auth_kv value for the social token key into data.sqlite3.
 func writeAuthKV(dataDB, raw string) {
 	d, err := db.Open(dataDB)
 	if err != nil {
@@ -262,8 +274,6 @@ func writeAuthKV(dataDB, raw string) {
 	d.Exec(`INSERT OR REPLACE INTO auth_kv(key,value) VALUES('kirocli:social:token',?)`, raw)
 }
 
-// repairStateTable ensures state uses value BLOB (required by kiro-cli 1.29.7+) and
-// removes welcomeAnnouncement.showCount which kiro-cli rejects as TEXT.
 func repairStateTable(dbPath string) {
 	d, err := db.Open(dbPath)
 	if err != nil {
@@ -288,7 +298,6 @@ func repairStateTable(dbPath string) {
 	}
 }
 
-// repairConversationsTable rebuilds conversations_v2 with kiro-cli's exact DDL if schema differs.
 func repairConversationsTable(dbPath string) {
 	d, err := db.Open(dbPath)
 	if err != nil {
@@ -300,9 +309,7 @@ func repairConversationsTable(dbPath string) {
 	if d.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='conversations_v2'`).Scan(&tblSQL) != nil {
 		return
 	}
-	wantsRepair := !strings.Contains(tblSQL, "milliseconds")
-
-	if !wantsRepair {
+	if strings.Contains(tblSQL, "milliseconds") {
 		return
 	}
 
@@ -323,7 +330,6 @@ func repairConversationsTable(dbPath string) {
 	d.Exec(`COMMIT`)
 }
 
-// ensureConversationsTable creates the legacy conversations table required by kiro-cli 1.29.7+.
 func ensureConversationsTable(dbPath string) {
 	d, err := db.Open(dbPath)
 	if err != nil {
@@ -333,7 +339,6 @@ func ensureConversationsTable(dbPath string) {
 	d.Exec(`CREATE TABLE IF NOT EXISTS conversations (key TEXT PRIMARY KEY, value TEXT)`)
 }
 
-// SyncActiveBack saves the live data.sqlite3 back to the active session file.
 func SyncActiveBack(dataDB, kiroDataDir string) error {
 	activeUUID := LiveActiveUUID(dataDB)
 	if activeUUID == "" {
@@ -355,18 +360,11 @@ func SyncActiveBack(dataDB, kiroDataDir string) error {
 	return nil
 }
 
-// SwapTo switches the active session:
-//  1. Saves the current data.sqlite3 back to the active session file (preserving it as-is).
-//  2. Merges conversation history from all sessions into the target.
-//  3. Syncs migrations from the current session into the target.
-//  4. Copies the target session file to data.sqlite3.
-//  5. Sets active_uuid and used_at on both files.
 func SwapTo(s Session, dataDB, kiroDataDir string) error {
 	if err := SyncActiveBack(dataDB, kiroDataDir); err != nil {
 		return fmt.Errorf("failed to sync active session back: %w", err)
 	}
 
-	// Save the current token and raw auth_kv before overwriting data.sqlite3.
 	oldToken, oldExpiry := readTokenFromDB(dataDB)
 	oldRaw := readAuthKV(dataDB)
 
@@ -399,7 +397,6 @@ func SwapTo(s Session, dataDB, kiroDataDir string) error {
 	ensureConversationsTable(dataDB)
 	ensureConversationsTable(s.File)
 
-	// If the new token is empty or expired but the old one was valid, restore it.
 	if oldToken != "" && !time.Now().After(oldExpiry) {
 		newToken, newExpiry := readTokenFromDB(dataDB)
 		if newToken == "" || (!newExpiry.IsZero() && time.Now().After(newExpiry)) {
@@ -420,7 +417,6 @@ func SwapTo(s Session, dataDB, kiroDataDir string) error {
 	return nil
 }
 
-// Resolve finds a session by numeric ID or filename.
 func Resolve(arg, kiroDataDir, dataDB string) (Session, error) {
 	sessions, err := List(kiroDataDir, dataDB)
 	if err != nil {

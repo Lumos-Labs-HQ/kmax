@@ -40,9 +40,6 @@ func callUsageLimits(token string) (*usageLimitsResp, error) {
 	return &result, nil
 }
 
-// Print fetches and prints credit usage for the given session.
-// For the active session it reads the token from data.sqlite3 directly,
-// since kiro-cli may have refreshed it since the last swap.
 func Print(s session.Session, dataDB string) error {
 	if s.Active {
 		if d, err := db.Open(dataDB); err == nil {
